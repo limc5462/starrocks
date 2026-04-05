@@ -21,12 +21,17 @@ import com.starrocks.catalog.Table;
 import com.starrocks.sql.optimizer.operator.OperatorType;
 import com.starrocks.sql.optimizer.operator.OperatorVisitor;
 import com.starrocks.sql.optimizer.operator.Projection;
+import com.starrocks.sql.optimizer.operator.scalar.CallOperator;
 import com.starrocks.sql.optimizer.operator.scalar.ColumnRefOperator;
 import com.starrocks.sql.optimizer.operator.scalar.ScalarOperator;
 
+import java.util.List;
 import java.util.Map;
 
 public class LogicalJDBCScanOperator extends LogicalScanOperator {
+
+    private List<ColumnRefOperator> groupingKeys;
+    private Map<ColumnRefOperator, CallOperator> aggCalls;
 
     public LogicalJDBCScanOperator(Table table,
                                    Map<ColumnRefOperator, Column> columnRefOperatorColumnMap,
@@ -42,6 +47,24 @@ public class LogicalJDBCScanOperator extends LogicalScanOperator {
         Preconditions.checkState(table instanceof JDBCTable);
     }
 
+    public LogicalJDBCScanOperator(Table table,
+                                   Map<ColumnRefOperator, Column> columnRefOperatorColumnMap,
+                                   Map<Column, ColumnRefOperator> columnMetaToColRefMap,
+                                   long limit,
+                                   ScalarOperator predicate,
+                                   Projection projection,
+                                   List<ColumnRefOperator> groupingKeys,
+                                   Map<ColumnRefOperator, CallOperator> aggCalls) {
+        super(OperatorType.LOGICAL_JDBC_SCAN,
+                table,
+                columnRefOperatorColumnMap,
+                columnMetaToColRefMap,
+                limit, predicate, projection);
+        this.groupingKeys = groupingKeys;
+        this.aggCalls = aggCalls;
+        Preconditions.checkState(table instanceof JDBCTable);
+    }
+
     private LogicalJDBCScanOperator() {
         super(OperatorType.LOGICAL_JDBC_SCAN);
     }
@@ -49,6 +72,22 @@ public class LogicalJDBCScanOperator extends LogicalScanOperator {
     @Override
     public <R, C> R accept(OperatorVisitor<R, C> visitor, C context) {
         return visitor.visitLogicalJDBCScan(this, context);
+    }
+
+    public List<ColumnRefOperator> getGroupingKeys() {
+        return groupingKeys;
+    }
+
+    public Map<ColumnRefOperator, CallOperator> getAggCalls() {
+        return aggCalls;
+    }
+
+    public void setGroupingKeys(List<ColumnRefOperator> groupingKeys) {
+        this.groupingKeys = groupingKeys;
+    }
+
+    public void setAggCalls(Map<ColumnRefOperator, CallOperator> aggCalls) {
+        this.aggCalls = aggCalls;
     }
 
     public static class Builder

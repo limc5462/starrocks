@@ -15,7 +15,12 @@
 package com.starrocks.connector.jdbc;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Lists;
+import com.starrocks.catalog.Column;
+import com.starrocks.common.SchemaConstants;
 import com.starrocks.connector.exception.StarRocksConnectorException;
+import com.starrocks.sql.ast.AggregateType;
+import com.starrocks.type.AggStateDesc;
 import com.starrocks.type.PrimitiveType;
 import com.starrocks.type.Type;
 import com.starrocks.type.TypeFactory;
@@ -27,6 +32,7 @@ import java.sql.Types;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -89,6 +95,62 @@ public class ClickhouseSchemaResolver extends JDBCSchemaResolver {
     }
 
 
+    @Override
+    public List<Column> convertToSRTable(ResultSet columnSet) throws SQLException {
+        List<Column> fullSchema = Lists.newArrayList();
+        while (columnSet.next()) {
+            String typeName = columnSet.getString("TYPE_NAME");
+            Type type = convertColumnType(columnSet.getInt("DATA_TYPE"),
+                    typeName,
+                    columnSet.getInt("COLUMN_SIZE"),
+                    columnSet.getInt("DECIMAL_DIGITS"));
+
+            String comment = "";
+            try {
+                if (columnSet.getString("REMARKS") != null) {
+                    comment = columnSet.getString("REMARKS");
+                }
+            } catch (SQLException ignored) {
+            }
+
+            Column column = new Column(columnSet.getString("COLUMN_NAME"), type,
+                    columnSet.getString("IS_NULLABLE").equals(SchemaConstants.YES), comment);
+
+            // Inject AGG_STATE_UNION metadata for AggregateFunction columns to support precise pushdown.
+            if (typeName != null && (typeName.startsWith("AggregateFunction(")
+                    || typeName.startsWith("SimpleAggregateFunction("))) {
+                injectAggStateMetadata(column, typeName);
+            }
+
+            fullSchema.add(column);
+        }
+        return fullSchema;
+    }
+
+    private void injectAggStateMetadata(Column column, String typeName) {
+        String inner;
+        if (typeName.startsWith("AggregateFunction(")) {
+            inner = typeName.substring("AggregateFunction(".length(), typeName.length() - 1);
+        } else if (typeName.startsWith("SimpleAggregateFunction(")) {
+            inner = typeName.substring("SimpleAggregateFunction(".length(), typeName.length() - 1);
+        } else {
+            return;
+        }
+
+        int firstComma = findFirstTopLevelComma(inner);
+        if (firstComma > 0) {
+            String funcName = inner.substring(0, firstComma).trim();
+            String argTypeName = inner.substring(firstComma + 1).trim();
+            Type argType = resolveInnerType(argTypeName);
+
+            if (argType.isValid()) {
+                AggStateDesc desc = new AggStateDesc(funcName, column.getType(),
+                        Lists.newArrayList(argType), true);
+                column.setAggregationType(AggregateType.AGG_STATE_UNION, true);
+                column.setAggStateDesc(desc);
+            }
+        }
+    }
     @Override
     public Type convertColumnType(int dataType, String typeName, int columnSize, int digits) {
         PrimitiveType primitiveType;
@@ -212,92 +274,14 @@ public class ClickhouseSchemaResolver extends JDBCSchemaResolver {
      * Resolves a raw ClickHouse type name string (possibly wrapped in {@code Nullable(…)})
      * directly to a StarRocks {@link Type}.
      *
-     * <p>Supported base types and their mappings:
-     * <pre>
-     *   Int8                            → TINYINT
-     *   UInt8, Int16                    → SMALLINT
-     *   UInt16, Int32                   → INT
-     *   Int64, UInt32                   → BIGINT
-     *   UInt64, Int128, UInt128,
-     *   Int256, UInt256                 → LARGEINT
-     *   Float32                         → FLOAT
-     *   Float64                         → DOUBLE
-     *   Bool                            → BOOLEAN
-     *   String, FixedString(N)          → VARCHAR(65533)
-     *   Date, Date32                    → DATE
-     *   DateTime, DateTime(tz)          → DATETIME
-     *   DateTime64(p), DateTime64(p,tz) → DATETIME
-     *   Decimal(P, S)                   → DecimalV3(P, S)
-     * </pre>
+     * <p>Currently, this method always returns VARCHAR because ClickHouse aggregate
+     * intermediate states are typically retrieved as strings via JDBC.
+     *
+     * TODO: Implement precise mapping for ClickHouse types (Int8, UInt64, Decimal, etc.)
+     * once the underlying connector supports them natively for aggregate states.
      */
     private Type resolveInnerType(String innerTypeName) {
-        // Strip Nullable wrapper if present.
-        String baseTypeName = innerTypeName;
-        if (innerTypeName.startsWith("Nullable(") && innerTypeName.endsWith(")")) {
-            baseTypeName = innerTypeName.substring("Nullable(".length(), innerTypeName.length() - 1).trim();
-        }
-
-        switch (baseTypeName) {
-            case "Int8":
-                return TypeFactory.createType(PrimitiveType.TINYINT);
-            case "UInt8":
-            case "Int16":
-                return TypeFactory.createType(PrimitiveType.SMALLINT);
-            case "UInt16":
-            case "Int32":
-                return TypeFactory.createType(PrimitiveType.INT);
-            case "Int64":
-            case "UInt32":
-                return TypeFactory.createType(PrimitiveType.BIGINT);
-            case "UInt64":
-            case "Int128":
-            case "UInt128":
-            case "Int256":
-            case "UInt256":
-                return TypeFactory.createType(PrimitiveType.LARGEINT);
-            case "Float32":
-                return TypeFactory.createType(PrimitiveType.FLOAT);
-            case "Float64":
-                return TypeFactory.createType(PrimitiveType.DOUBLE);
-            case "Bool":
-                return TypeFactory.createType(PrimitiveType.BOOLEAN);
-            case "String":
-                return TypeFactory.createVarcharType(65533);
-            case "Date":
-            case "Date32":
-                return TypeFactory.createType(PrimitiveType.DATE);
-            default:
-                break;
-        }
-
-        // Prefix-matched types.
-        if (baseTypeName.startsWith("FixedString(")) {
-            return TypeFactory.createVarcharType(65533);
-        }
-        // DateTime with optional timezone: DateTime('Asia/Shanghai')
-        if (baseTypeName.equals("DateTime") || baseTypeName.startsWith("DateTime(")) {
-            return TypeFactory.createType(PrimitiveType.DATETIME);
-        }
-        // DateTime64 with precision and optional timezone: DateTime64(3) or DateTime64(3, 'Asia/Shanghai')
-        if (baseTypeName.startsWith("DateTime64(")) {
-            return TypeFactory.createType(PrimitiveType.DATETIME);
-        }
-        // Decimal(P, S)
-        if (baseTypeName.startsWith("Decimal(") && baseTypeName.endsWith(")")) {
-            String decimalInner = baseTypeName.substring("Decimal(".length(), baseTypeName.length() - 1);
-            String[] parts = decimalInner.split(",");
-            if (parts.length == 2) {
-                try {
-                    int precision = Integer.parseInt(parts[0].trim());
-                    int scale = Integer.parseInt(parts[1].trim());
-                    return TypeFactory.createUnifiedDecimalType(precision, scale);
-                } catch (NumberFormatException ignored) {
-                    // fall through to UNKNOWN_TYPE
-                }
-            }
-        }
-
-        return TypeFactory.createType(PrimitiveType.UNKNOWN_TYPE);
+        return TypeFactory.createVarcharType(65533);
     }
 
 }

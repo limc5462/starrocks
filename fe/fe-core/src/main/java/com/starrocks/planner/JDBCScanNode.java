@@ -46,6 +46,8 @@ public class JDBCScanNode extends ScanNode {
     private String tableName;
     private JDBCTable table;
 
+    private List<String> groupByColumns = new ArrayList<>();
+
     public JDBCScanNode(PlanNodeId id, TupleDescriptor desc, JDBCTable tbl) {
         super(id, desc, "SCAN JDBC");
         table = tbl;
@@ -99,6 +101,10 @@ public class JDBCScanNode extends ScanNode {
         createJDBCTableFilters();
     }
 
+    public void setAggPushdown(List<String> groupByColumns) {
+        this.groupByColumns = groupByColumns;
+    }
+
     @Override
     protected String getNodeExplainString(String prefix, TExplainLevel detailLevel) {
         StringBuilder output = new StringBuilder();
@@ -117,6 +123,10 @@ public class JDBCScanNode extends ScanNode {
             sql.append(Joiner.on(") AND (").join(filters));
             sql.append(")");
         }
+
+        if (groupByColumns != null && !groupByColumns.isEmpty()) {
+            sql.append(" GROUP BY ").append(Joiner.on(", ").join(groupByColumns));
+        }
         return sql.toString();
     }
 
@@ -127,7 +137,9 @@ public class JDBCScanNode extends ScanNode {
                 continue;
             }
             String colName = slot.getColumn().getName();
-            if (objectIdentifier.isEmpty() || (
+            if (colName.contains("(")) {
+                columns.add(colName);
+            } else if (objectIdentifier.isEmpty() || (
                     colName.startsWith(objectIdentifier) && colName.endsWith(objectIdentifier))) {
                 columns.add(colName);
             } else {
@@ -204,6 +216,7 @@ public class JDBCScanNode extends ScanNode {
         msg.jdbc_scan_node.setColumns(columns);
         msg.jdbc_scan_node.setFilters(filters);
         msg.jdbc_scan_node.setLimit(limit);
+        msg.jdbc_scan_node.setGroup_by_columns(groupByColumns);
     }
 
     @Override

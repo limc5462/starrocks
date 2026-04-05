@@ -25,6 +25,7 @@ import com.starrocks.catalog.ColumnAccessPath;
 import com.starrocks.catalog.Function;
 import com.starrocks.catalog.FunctionSet;
 import com.starrocks.catalog.IcebergTable;
+import com.starrocks.catalog.JDBCResource;
 import com.starrocks.catalog.JDBCTable;
 import com.starrocks.catalog.MaterializedIndex;
 import com.starrocks.catalog.MaterializedIndexMeta;
@@ -2078,6 +2079,17 @@ public class PlanFragmentBuilder {
 
             scanNode.setLimit(node.getLimit());
             scanNode.computeColumnsAndFilters();
+
+            if (node.getAggCalls() != null && !node.getAggCalls().isEmpty()) {
+                List<String> groupByColumns = Lists.newArrayList();
+                String identifier = getIdentifierSymbol(scanNode);
+                for (ColumnRefOperator grouping : node.getGroupingKeys()) {
+                    groupByColumns.add(identifier + grouping.getName() + identifier);
+                }
+
+                scanNode.setAggPushdown(groupByColumns);
+            }
+
             scanNode.computeStatistics(optExpression.getStatistics());
             scanNode.setScanOptimizeOption(node.getScanOptimizeOption());
             registerScanNode(node, scanNode, context);
@@ -2085,6 +2097,23 @@ public class PlanFragmentBuilder {
                     new PlanFragment(context.getNextFragmentId(), scanNode, DataPartition.UNPARTITIONED);
             context.getFragments().add(fragment);
             return fragment;
+        }
+
+        private String getIdentifierSymbol(JDBCScanNode node) {
+            String jdbcUri = ((JDBCTable) node.getDesc().getTable()).getConnectInfo(JDBCResource.URI);
+            if (jdbcUri == null) {
+                return "";
+            }
+            if (jdbcUri.startsWith("jdbc:mysql") ||
+                    jdbcUri.startsWith("jdbc:mariadb") ||
+                    jdbcUri.startsWith("jdbc:clickhouse")) {
+                return "`";
+            }
+            if (jdbcUri.startsWith("jdbc:postgresql") ||
+                    jdbcUri.startsWith("jdbc:postgres")) {
+                return "\"";
+            }
+            return "";
         }
 
         @Override
