@@ -139,9 +139,15 @@ public class PushDownAggToJDBCScanRule extends TransformationRule {
             if (column.getAggregationType() != AggregateType.AGG_STATE_UNION || column.getAggStateDesc() == null) {
                 return false;
             }
-
+            
             AggStateDesc desc = column.getAggStateDesc();
-            if (!desc.getFunctionName().equalsIgnoreCase(call.getFnName())) {
+            String ckFuncName = desc.getFunctionName();
+            String baseFuncName = ckFuncName;
+            if (ckFuncName.toLowerCase().endsWith("merge")) {
+                baseFuncName = ckFuncName.substring(0, ckFuncName.length() - 5);
+            }
+
+            if (!baseFuncName.equalsIgnoreCase(call.getFnName())) {
                 return false;
             }
 
@@ -183,14 +189,15 @@ public class PushDownAggToJDBCScanRule extends TransformationRule {
             // 2. 通过 scan 拿到原始列定义
             Column column = scan.getColRefToColumnMetaMap().get(argRef);
             String physicalColumnName = column.getName(); // 这里拿到的就是“中文名”或者 CK 里的原始名
-
-            String columnName = call.getFnName() + "(" + physicalColumnName + ")";
-            newColRefToColumnMetaMap.put(key, new Column(columnName, call.getType()));
-
-            // Based on ClickHouse model: if it's an AGG_STATE_UNION column, we must use the "Merge" function variant.
-            // AggStateDesc was populated during schema resolution in ClickhouseSchemaResolver.
             AggStateDesc desc = column.getAggStateDesc();
-            String clickhouseFuncName = desc.getFunctionName() + "Merge";
+            String clickhouseFuncName = desc.getFunctionName();
+
+            // Generate native ClickHouse cast wrapped column name
+            String baseAgg = clickhouseFuncName + "(" + physicalColumnName + ")";
+            String ckType = getClickhouseType(call.getType());
+            String columnName = "CAST(" + baseAgg + " AS " + ckType + ")";
+            
+            newColRefToColumnMetaMap.put(key, new Column(columnName, call.getType()));
 
             // Construct new CallOperator with the ClickHouse-specific function name.
             // We use the same arguments and return type as the original StarRocks aggregate call.
@@ -226,5 +233,43 @@ public class PushDownAggToJDBCScanRule extends TransformationRule {
 
         String driver = table.getConnectInfo(com.starrocks.catalog.JDBCResource.DRIVER_CLASS);
         return driver != null && driver.toLowerCase().contains("clickhouse");
+    }
+
+    private String getClickhouseType(Type type) {
+        if (type.isDecimalV3()) {
+            return "Decimal(" + type.getPrecision() + ", " + 
+                   ((com.starrocks.type.ScalarType) type).getScalarScale() + ")";
+        }
+
+        switch (type.getPrimitiveType()) {
+            case DOUBLE:
+                return "Float64";
+            case FLOAT:
+                return "Float32";
+            case BIGINT:
+                return "Int64";
+            case LARGEINT:
+                return "Int128";
+            case INT:
+                return "Int32";
+            case SMALLINT:
+                return "Int16";
+            case TINYINT:
+                return "Int8";
+            case VARCHAR:
+            case CHAR:
+                return "String";
+            case BOOLEAN:
+                return "UInt8";
+            case DATE:
+                return "Date";
+            case DATETIME:
+                return "DateTime";
+            default:
+                if (type.isStringType()) {
+                    return "String";
+                }
+                return type.toSql();
+        }
     }
 }

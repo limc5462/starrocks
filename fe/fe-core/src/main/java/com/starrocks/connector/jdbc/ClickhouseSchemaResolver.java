@@ -140,6 +140,9 @@ public class ClickhouseSchemaResolver extends JDBCSchemaResolver {
         int firstComma = findFirstTopLevelComma(inner);
         if (firstComma > 0) {
             String funcName = inner.substring(0, firstComma).trim();
+            if (typeName.startsWith("AggregateFunction(")) {
+                funcName = funcName + "Merge";
+            }
             String argTypeName = inner.substring(firstComma + 1).trim();
             Type argType = resolveInnerType(argTypeName);
 
