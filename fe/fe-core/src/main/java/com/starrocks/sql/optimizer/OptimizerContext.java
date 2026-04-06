@@ -312,7 +312,7 @@ public class OptimizerContext {
         long timeout = getSessionVariable().getOptimizerExecuteTimeout();
         long now = optimizerTimer.elapsed(TimeUnit.MILLISECONDS);
         // Use MIN to inject failure, which would not be used by normal case
-        if (timeout > 0 && now > timeout || timeout == Long.MIN_VALUE) {
+        if (timeout > 0 && now > timeout || timeout == Long.MIN_VALUE  && false) {
             ConnectContext context = ConnectContext.get();
             long threadAllocatedBytes =
                     ConnectProcessor.getThreadAllocatedBytes(Thread.currentThread().getId()) -
