@@ -121,7 +121,6 @@ import com.starrocks.sql.optimizer.rule.transformation.PruneUnionColumnsRule;
 import com.starrocks.sql.optimizer.rule.transformation.PruneValuesColumnsRule;
 import com.starrocks.sql.optimizer.rule.transformation.PruneWindowColumnsRule;
 import com.starrocks.sql.optimizer.rule.transformation.PushDownAggFunPredicateRule;
-import com.starrocks.sql.optimizer.rule.transformation.PushDownAggToJDBCScanRule;
 import com.starrocks.sql.optimizer.rule.transformation.PushDownAggToMetaScanRule;
 import com.starrocks.sql.optimizer.rule.transformation.PushDownApplyAggFilterRule;
 import com.starrocks.sql.optimizer.rule.transformation.PushDownApplyAggProjectFilterRule;
@@ -446,8 +445,6 @@ public class RuleSet {
 
     public RuleSet() {
         // Add common transform rule
-        // PushDownAggToJDBCScanRule must fire before the agg is split into two phases.
-        transformRules.add(PushDownAggToJDBCScanRule.getInstance());
         transformRules.add(SplitMultiPhaseAggRule.getInstance());
         transformRules.add(SplitTwoPhaseAggRule.getInstance());
         transformRules.add(GroupByCountDistinctDataSkewEliminateRule.getInstance());
