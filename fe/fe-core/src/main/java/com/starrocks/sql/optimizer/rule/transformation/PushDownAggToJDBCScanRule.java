@@ -137,6 +137,21 @@ public class PushDownAggToJDBCScanRule extends TransformationRule {
             }
         }
 
+        // TODO: Currently, we do not support pushing down aggregations that have predicates (WHERE clauses)
+        // on columns not present in the GROUP BY clause.
+        if (scan.getPredicate() != null) {
+            for (int colId : scan.getPredicate().getUsedColumns().getColumnIds()) {
+                ColumnRefOperator col = context.getColumnRefFactory().getColumnRef(colId);
+                if (!agg.getGroupingKeys().contains(col)) {
+                    throw new com.starrocks.sql.common.StarRocksPlannerException(
+                            "Unsupported JDBC aggregation pushdown: the WHERE clause contains a column ('" + 
+                            col.getName() + "') that is not part of the GROUP BY list. " +
+                            "Please include it in the GROUP BY or disable aggregation pushdown.",
+                            com.starrocks.sql.common.ErrorType.UNSUPPORTED);
+                }
+            }
+        }
+
         return true;
     }
 

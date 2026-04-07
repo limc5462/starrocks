@@ -141,7 +141,12 @@ public class ClickhouseSchemaResolver extends JDBCSchemaResolver {
         if (firstComma > 0) {
             String funcName = inner.substring(0, firstComma).trim();
             if (typeName.startsWith("AggregateFunction(")) {
-                funcName = funcName + "Merge";
+                int paramParen = funcName.indexOf('(');
+                if (paramParen != -1) {
+                    funcName = funcName.substring(0, paramParen).trim() + "Merge" + funcName.substring(paramParen);
+                } else {
+                    funcName = funcName + "Merge";
+                }
             }
             String argTypeName = inner.substring(firstComma + 1).trim();
             Type argType = resolveInnerType(argTypeName);
