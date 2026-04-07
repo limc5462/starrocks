@@ -129,7 +129,8 @@ public class MockedJDBCMetadata implements ConnectorMetadata {
                             Types.OTHER,   // min_price (min)
                             Types.OTHER,   // total_count (count)
                             Types.OTHER,    // avg_score (avg)
-                            Types.OTHER    // simple_sum (simple sum)
+                            Types.OTHER,    // simple_sum (simple sum)
+                            Types.OTHER  // decimal_col (sum Decimal)
                     ));
                     columnResult.addColumn("TYPE_NAME", Arrays.asList(
                             "Int32", 
@@ -138,14 +139,16 @@ public class MockedJDBCMetadata implements ConnectorMetadata {
                             "AggregateFunction(min, Float64)",
                             "AggregateFunction(count, Int32)",
                             "AggregateFunction(avg, Float64)",
-                            "SimpleAggregateFunction(sum, Int32)"
+                            "SimpleAggregateFunction(sum, Int32)",
+                            "AggregateFunction(sum, Decimal(18, 4))"
                     ));
-                    columnResult.addColumn("COLUMN_SIZE", Arrays.asList(4, 0, 0, 0, 0, 0, 0));
-                    columnResult.addColumn("DECIMAL_DIGITS", Arrays.asList(0, 0, 0, 0, 0, 0, 0));
+                    columnResult.addColumn("COLUMN_SIZE", Arrays.asList(4, 0, 0, 0, 0, 0, 0, 18));
+                    columnResult.addColumn("DECIMAL_DIGITS", Arrays.asList(0, 0, 0, 0, 0, 0, 0, 4));
                     columnResult.addColumn("COLUMN_NAME", Arrays.asList(
-                            "id", "clicks", "max_price", "min_price", "total_count", "avg_score", "simple_sum"));
-                    columnResult.addColumn("IS_NULLABLE", Arrays.asList("NO", "YES", "YES", "YES", "YES", "YES", "YES"));
-                    columnResult.addColumn("REMARKS", Arrays.asList("", "", "", "", "", "", ""));
+                            "id", "clicks", "max_price", "min_price", "total_count", "avg_score", "simple_sum", "decimal_col"));
+                    columnResult.addColumn("IS_NULLABLE", Arrays.asList("NO", "YES", "YES", "YES", "YES", "YES", "YES", "YES"));
+                    columnResult.addColumn("REMARKS", Arrays.asList("", "", "", "", "", "", "", ""));
+
 
                     ClickhouseSchemaResolver resolver = new ClickhouseSchemaResolver(properties);
                     return resolver.convertToSRTable(columnResult);
